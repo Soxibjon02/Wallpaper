@@ -1,0 +1,8 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'com.wallora.wallpaper'
+version = '1.0.0'
+android { namespace "com.wallora.wallpaper"; defaultConfig { minSdkVersion 23 } }
+dependencies { implementation 'androidx.work:work-runtime-ktx:2.9.1' }

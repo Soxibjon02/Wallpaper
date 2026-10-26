@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "WALLORA",
+    "slug": "wallora",
+    "scheme": "wallora",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      ["expo-image-picker", {"photosPermission": "Allow WALLORA to select images for your wallpaper collections."}]
+    ],
+    "android": {
+      "package": "com.wallora.app",
+      "permissions": ["READ_MEDIA_IMAGES", "READ_EXTERNAL_STORAGE", "SET_WALLPAPER", "RECEIVE_BOOT_COMPLETED", "WAKE_LOCK"]
+    },
+    "ios": {"bundleIdentifier": "com.wallora.app"}
+  }
+}

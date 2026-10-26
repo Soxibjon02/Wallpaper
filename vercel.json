@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "apps/web/dist",
+  "rewrites": [
+    { "source": "/api/wallpapers", "destination": "/api/wallpapers" },
+    { "source": "/api/install-event", "destination": "/api/install-event" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

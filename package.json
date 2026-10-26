@@ -1,0 +1,13 @@
+{
+  "name": "wallora",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:web": "npm --workspace @wallora/web run dev",
+    "build:web": "npm --workspace @wallora/web run build",
+    "typecheck:web": "npm --workspace @wallora/web run typecheck",
+    "start:mobile": "npm --workspace @wallora/mobile run start",
+    "android": "npm --workspace @wallora/mobile run android"
+  }
+}
