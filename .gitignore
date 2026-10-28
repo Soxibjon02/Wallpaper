@@ -10,3 +10,5 @@ ios/Pods
 *.keystore
 *.jks
 .DS_Store
+*.tsbuildinfo
+

@@ -8,7 +8,6 @@ import {
   Trash2,
   Edit2,
   RefreshCw,
-  ExternalLink,
   Check,
   AlertCircle,
   Image as ImageIcon,
@@ -17,30 +16,40 @@ import {
   Database,
   Eye,
   Sliders,
+  FolderPlus,
+  Tag,
 } from "lucide-react";
 import type { Wallpaper } from "@shared/index";
 import {
   ADMIN_CREDENTIALS,
   isAdminAuthenticated,
   setAdminAuthenticated,
-  saveWallpapersToBin,
-  fetchWallpapersFromBin,
+  saveCatalogueToBin,
+  fetchCatalogueFromBin,
   JSONBIN_CONFIG,
 } from "../services/jsonbin";
 
 interface AdminPanelProps {
   wallpapers: Wallpaper[];
+  categories: string[];
   onWallpapersUpdated: (updated: Wallpaper[]) => void;
+  onCategoriesUpdated: (updatedCategories: string[]) => void;
   onNotice: (msg: string) => void;
 }
 
-export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminPanelProps) {
+export function AdminPanel({
+  wallpapers,
+  categories,
+  onWallpapersUpdated,
+  onCategoriesUpdated,
+  onNotice,
+}: AdminPanelProps) {
   const [authenticated, setAuthenticated] = useState<boolean>(isAdminAuthenticated);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"add" | "manage" | "info">("add");
+  const [activeTab, setActiveTab] = useState<"add" | "manage" | "categories" | "info">("add");
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
@@ -49,33 +58,30 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
   const [title, setTitle] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
-  const [category, setCategory] = useState("Nature");
+  const [category, setCategory] = useState(categories[0] || "Nature");
   const [customCategory, setCustomCategory] = useState("");
   const [description, setDescription] = useState("");
+  const [authorName, setAuthorName] = useState("Super Admin");
   const [tags, setTags] = useState("");
   const [width, setWidth] = useState("2160");
   const [height, setHeight] = useState("3840");
   const [featured, setFeatured] = useState(false);
-  const [license, setLicense] = useState("Free for personal use");
+  const license = "Free for personal use";
   const [previewLoaded, setPreviewLoaded] = useState(false);
+
+  // Categories management state
+  const [newCatName, setNewCatName] = useState("");
+  const [editingCat, setEditingCat] = useState<{ oldName: string; newName: string } | null>(null);
 
   // Edit modal state
   const [editingWallpaper, setEditingWallpaper] = useState<Wallpaper | null>(null);
 
-  const categories = [
-    "Nature",
-    "Landscapes",
-    "Ocean",
-    "Cars",
-    "Architecture",
-    "Space",
-    "AMOLED",
-    "Cyberpunk",
-    "Anime",
-    "Abstract",
-    "Minimal",
-    "Boshqa...",
-  ];
+  // Keep category in sync with available categories
+  useEffect(() => {
+    if (categories.length > 0 && !categories.includes(category)) {
+      setCategory(categories[0]);
+    }
+  }, [categories, category]);
 
   function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -145,18 +151,19 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
       imageUrl: imageUrl.trim(),
       thumbnailUrl: thumbnailUrl.trim() || imageUrl.trim(),
       category: finalCategory,
-      tags: finalTags.length ? finalTags : ["wallpaper"],
+      tags: finalTags.length ? finalTags : [finalCategory.toLowerCase(), "wallpaper"],
       width: parseInt(width) || 2160,
       height: parseInt(height) || 3840,
       featured,
       license: license.trim() || "Free for personal use",
       createdAt: new Date().toISOString(),
+      authorName: authorName.trim() || "Super Admin",
     };
 
     setSaving(true);
     try {
       const updatedList = [newWallpaper, ...wallpapers];
-      await saveWallpapersToBin(updatedList);
+      await saveCatalogueToBin(updatedList, categories);
       onWallpapersUpdated(updatedList);
       onNotice(`"${newWallpaper.title}" JSONBin.io ga muvaffaqiyatli yuklandi!`);
 
@@ -186,7 +193,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
     setSaving(true);
     try {
       const updatedList = wallpapers.filter((w) => w.id !== id);
-      await saveWallpapersToBin(updatedList);
+      await saveCatalogueToBin(updatedList, categories);
       onWallpapersUpdated(updatedList);
       onNotice(`"${name}" JSONBin dan o'chirildi!`);
     } catch (err: unknown) {
@@ -203,7 +210,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
       const updatedList = wallpapers.map((item) =>
         item.id === w.id ? { ...item, featured: !item.featured } : item
       );
-      await saveWallpapersToBin(updatedList);
+      await saveCatalogueToBin(updatedList, categories);
       onWallpapersUpdated(updatedList);
       onNotice(`"${w.title}" featured holati yangilandi!`);
     } catch (err: unknown) {
@@ -223,7 +230,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
       const updatedList = wallpapers.map((w) =>
         w.id === editingWallpaper.id ? editingWallpaper : w
       );
-      await saveWallpapersToBin(updatedList);
+      await saveCatalogueToBin(updatedList, categories);
       onWallpapersUpdated(updatedList);
       setEditingWallpaper(null);
       onNotice(`"${editingWallpaper.title}" ma'lumotlari yangilandi!`);
@@ -235,12 +242,102 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
     }
   }
 
+  // --- Category Management Handlers ---
+  async function handleCreateCategory(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newCatName.trim();
+    if (!name) return;
+
+    if (categories.some((c) => c.toLowerCase() === name.toLowerCase())) {
+      onNotice(`"${name}" toifasi allaqachon mavjud!`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updatedCats = [...categories, name];
+      await saveCatalogueToBin(wallpapers, updatedCats);
+      onCategoriesUpdated(updatedCats);
+      setNewCatName("");
+      onNotice(`"${name}" toifasi muvaffaqiyatli yaratildi va saqlandi!`);
+    } catch (err: unknown) {
+      console.error(err);
+      onNotice((err as Error).message || "Kategoriyani saqlashda xatolik!");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteCategory(catName: string) {
+    const inUseCount = wallpapers.filter((w) => w.category === catName).length;
+    let message = `Rostdan ham "${catName}" toifasini o'chirmoqchimisiz?`;
+    if (inUseCount > 0) {
+      message = `Diqqat! "${catName}" toifasida ${inUseCount} ta fon rasmi mavjud. Ushbu toifani o'chirishni tasdiqlaysizmi?`;
+    }
+
+    if (!window.confirm(message)) return;
+
+    setSaving(true);
+    try {
+      const updatedCats = categories.filter((c) => c !== catName);
+      await saveCatalogueToBin(wallpapers, updatedCats);
+      onCategoriesUpdated(updatedCats);
+      onNotice(`"${catName}" toifasi o'chirildi!`);
+    } catch (err: unknown) {
+      console.error(err);
+      onNotice((err as Error).message || "Kategoriyani o'chirishda xatolik!");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveEditCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingCat) return;
+    const { oldName, newName } = editingCat;
+    const trimmedNew = newName.trim();
+    if (!trimmedNew || trimmedNew === oldName) {
+      setEditingCat(null);
+      return;
+    }
+
+    if (
+      categories.some(
+        (c) => c.toLowerCase() === trimmedNew.toLowerCase() && c.toLowerCase() !== oldName.toLowerCase()
+      )
+    ) {
+      onNotice(`"${trimmedNew}" toifasi allaqachon mavjud!`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updatedCats = categories.map((c) => (c === oldName ? trimmedNew : c));
+      // Also update wallpapers that were tagged with old category
+      const updatedWallpapers = wallpapers.map((w) =>
+        w.category === oldName ? { ...w, category: trimmedNew } : w
+      );
+
+      await saveCatalogueToBin(updatedWallpapers, updatedCats);
+      onCategoriesUpdated(updatedCats);
+      onWallpapersUpdated(updatedWallpapers);
+      setEditingCat(null);
+      onNotice(`Toifa "${trimmedNew}" ga o'zgartirildi va tegishli rasmlar yangilandi!`);
+    } catch (err: unknown) {
+      console.error(err);
+      onNotice((err as Error).message || "Kategoriyani yangilashda xatolik!");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSyncWithJsonBin() {
     setSyncing(true);
     try {
-      const remote = await fetchWallpapersFromBin();
-      onWallpapersUpdated(remote);
-      onNotice(`JSONBin.io bilan sinxronlandi! (${remote.length} ta rasm)`);
+      const remote = await fetchCatalogueFromBin();
+      onWallpapersUpdated(remote.wallpapers);
+      onCategoriesUpdated(remote.categories);
+      onNotice(`JSONBin.io bilan sinxronlandi! (${remote.wallpapers.length} ta rasm, ${remote.categories.length} ta toifa)`);
     } catch (err: unknown) {
       console.error(err);
       onNotice("JSONBin dan qayta yuklashda xatolik!");
@@ -256,6 +353,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
     return (
       w.title.toLowerCase().includes(q) ||
       w.category.toLowerCase().includes(q) ||
+      (w.authorName && w.authorName.toLowerCase().includes(q)) ||
       w.tags.some((t) => t.toLowerCase().includes(q))
     );
   });
@@ -268,12 +366,12 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
           <div className="admin-login-card">
             <div className="admin-login-badge">
               <ShieldCheck size={18} />
-              <span>WALLORA ADMIN PORTAL</span>
+              <span>WALLORA SUPER ADMIN PORTAL</span>
             </div>
 
             <h2>Admin Panelga Kirish</h2>
             <p className="admin-login-subtitle">
-              Rasmlarni boshqarish va JSONBin.io ga yangi fon rasmlari yuklash uchun tizimga kiring.
+              Kategoriyalarni yaratish, barcha rasmlarni boshqarish va JSONBin.io ga fon rasmlari yuklash uchun tizimga kiring.
             </p>
 
             {loginError && (
@@ -328,7 +426,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
 
             <div className="admin-hint-card">
               <small>
-                <strong>Belgilangan hisob:</strong> Login: <code>admin1234</code> | Parol:{" "}
+                <strong>Super Admin hisobi:</strong> Login: <code>admin1234</code> | Parol:{" "}
                 <code>admin123</code>
               </small>
             </div>
@@ -346,12 +444,12 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
         <div>
           <div className="eyebrow">
             <span className="eyebrow-line" />
-            ADMIN BOSHQARUV PANEL
+            SUPER ADMIN BOSHQARUV PANEL
           </div>
           <h1>
-            Wallpaper & JSONBin Boshqaruvi<span className="heading-period">.</span>
+            Wallpaper & Toifalar Boshqaruvi<span className="heading-period">.</span>
           </h1>
-          <p>Rasmlar to'plamini JSONBin.io bulut omboriga yuklang va tahrirlang.</p>
+          <p>Yangi toifalar yarating, barcha foydalanuvchilar yuklagan rasmlarni nazorat qiling va JSONBin.io bulut omborini boshqaring.</p>
         </div>
 
         <div className="admin-header-actions">
@@ -385,6 +483,10 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
           <ImageIcon size={15} />
           <span>Jami rasmlar: <strong>{wallpapers.length} ta</strong></span>
         </div>
+        <div className="admin-status-item">
+          <Tag size={15} />
+          <span>Toifalar: <strong>{categories.length} ta</strong></span>
+        </div>
       </div>
 
       {/* Admin Tabs */}
@@ -394,6 +496,12 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
           onClick={() => setActiveTab("add")}
         >
           <Plus size={16} /> Yangi rasm qo'shish
+        </button>
+        <button
+          className={`admin-tab-btn ${activeTab === "categories" ? "tab-active" : ""}`}
+          onClick={() => setActiveTab("categories")}
+        >
+          <FolderPlus size={16} /> Toifalarni boshqarish ({categories.length})
         </button>
         <button
           className={`admin-tab-btn ${activeTab === "manage" ? "tab-active" : ""}`}
@@ -441,6 +549,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                         {c}
                       </option>
                     ))}
+                    <option value="Boshqa...">+ Maxsus toifa kiritish...</option>
                   </select>
                 </div>
               </div>
@@ -452,65 +561,53 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                     type="text"
                     value={customCategory}
                     onChange={(e) => setCustomCategory(e.target.value)}
-                    placeholder="Yangi toifa nomi"
-                    required
+                    placeholder="Masalan: Sport, Neon, Cyber"
                   />
                 </div>
               )}
 
               <div className="form-field">
-                <label>Rasm to'liq havolasi (Image URL) *</label>
+                <label>Muallif nomi / Yuklovchi</label>
+                <input
+                  type="text"
+                  value={authorName}
+                  onChange={(e) => setAuthorName(e.target.value)}
+                  placeholder="Super Admin"
+                />
+              </div>
+
+              <div className="form-field">
+                <label>Rasm URL havolasi (HTTPS) *</label>
                 <input
                   type="url"
                   value={imageUrl}
                   onChange={(e) => setImageUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/... yoki to'g'ridan-to'g'ri rasm linki"
+                  placeholder="https://images.unsplash.com/photo-..."
                   required
                 />
-                <small className="field-hint">
-                  To'g'ridan-to'g'ri JPG, PNG, WebP havolasi (Unsplash, Pexels, Imgur yoki o'zingizning serveringiz)
-                </small>
+                <span className="field-hint">
+                  Unsplash, Pexels yoki to'g'ridan-to'g'ri rasm havolasini kiriting.
+                </span>
               </div>
 
               <div className="form-field">
-                <label>Kichik rasm (Thumbnail URL - ixtiyoriy)</label>
+                <label>Thumbnail (Kichik rasm) URL (Ixtiyoriy)</label>
                 <input
                   type="url"
                   value={thumbnailUrl}
                   onChange={(e) => setThumbnailUrl(e.target.value)}
-                  placeholder="Kiritilmasa, asosiy rasm ishlatiladi"
+                  placeholder="Bo'sh qoldirilsa, asosiy rasm ishlatiladi"
                 />
               </div>
 
               <div className="form-field">
-                <label>Tavsif (Description)</label>
+                <label>Rasm izohi / Tavsifi</label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Rasm haqida qisqacha ma'lumot..."
                   rows={2}
+                  placeholder="Rasm haqida qisqacha ma'lumot yoki izoh..."
                 />
-              </div>
-
-              <div className="form-row">
-                <div className="form-field">
-                  <label>Teglar (vergul bilan ajrating)</label>
-                  <input
-                    type="text"
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    placeholder="neon, city, 4k, dark"
-                  />
-                </div>
-                <div className="form-field">
-                  <label>Litsenziya</label>
-                  <input
-                    type="text"
-                    value={license}
-                    onChange={(e) => setLicense(e.target.value)}
-                    placeholder="Free for personal use"
-                  />
-                </div>
               </div>
 
               <div className="form-row">
@@ -520,7 +617,6 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                     type="number"
                     value={width}
                     onChange={(e) => setWidth(e.target.value)}
-                    placeholder="2160"
                   />
                 </div>
                 <div className="form-field">
@@ -529,9 +625,18 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                     type="number"
                     value={height}
                     onChange={(e) => setHeight(e.target.value)}
-                    placeholder="3840"
                   />
                 </div>
+              </div>
+
+              <div className="form-field">
+                <label>Teglar (vergul bilan ajrating)</label>
+                <input
+                  type="text"
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder="nature, mountain, dark, amoled"
+                />
               </div>
 
               <div className="form-checkbox">
@@ -541,7 +646,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                     checked={featured}
                     onChange={(e) => setFeatured(e.target.checked)}
                   />
-                  <span>Tanlangan rasm (Featured - Bosh sahifada yuqorida ko'rsatish)</span>
+                  <span>Featured (Bosh sahifada tavsiya qilingan rasm sifatida ko'rsatilsin)</span>
                 </label>
               </div>
 
@@ -595,6 +700,9 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
 
                 <div className="preview-meta">
                   <h3>{title || "Rasm sarlavhasi"}</h3>
+                  <div className="preview-author-badge" style={{ marginBottom: 6 }}>
+                    <User size={12} /> {authorName || "Super Admin"}
+                  </div>
                   <p>{description || "Tavsif kiritilmagan..."}</p>
                   <div className="preview-specs">
                     <span>O'lcham: {width} × {height}</span>
@@ -614,7 +722,78 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
         </div>
       )}
 
-      {/* Tab 2: Manage Existing Wallpapers */}
+      {/* Tab 2: Manage Categories (SUPER ADMIN EXCLUSIVE) */}
+      {activeTab === "categories" && (
+        <div className="admin-categories-section">
+          {/* Add Category Card */}
+          <div className="admin-card">
+            <div className="admin-card-head">
+              <h2><FolderPlus size={18} /> Yangi Toifa (Kategoriya) Yaratish</h2>
+              <p>Super admin sifatida yangi toifalar qo'shing. Ushbu toifalar barcha foydalanuvchilarga rasm yuklashda va qidirishda ko'rinadi.</p>
+            </div>
+
+            <form onSubmit={handleCreateCategory} className="admin-category-form">
+              <div className="cat-input-row">
+                <input
+                  type="text"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  placeholder="Yangi toifa nomi (Masalan: Sport, Neon, Hayvonlar, Minimalizm)..."
+                  required
+                />
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={saving || !newCatName.trim()}
+                >
+                  <Plus size={16} /> Toifa Qo'shish
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Existing Categories List */}
+          <div className="admin-card" style={{ marginTop: 20 }}>
+            <div className="admin-card-head">
+              <h2><Tag size={18} /> Mavjud Toifalar Ro'yxati ({categories.length})</h2>
+              <p>Har bir toifani tahrirlashingiz yoki o'chirishingiz mumkin. O'zgarishlar darhol JSONBin.io bulutida saqlanadi.</p>
+            </div>
+
+            <div className="admin-cats-grid">
+              {categories.map((cat) => {
+                const count = wallpapers.filter((w) => w.category === cat).length;
+                return (
+                  <div key={cat} className="admin-cat-card">
+                    <div className="admin-cat-info">
+                      <strong>{cat}</strong>
+                      <span>{count} ta rasm</span>
+                    </div>
+
+                    <div className="admin-cat-actions">
+                      <button
+                        className="action-icon-btn"
+                        onClick={() => setEditingCat({ oldName: cat, newName: cat })}
+                        title="Nomini tahrirlash"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button
+                        className="action-icon-btn delete-btn"
+                        onClick={() => handleDeleteCategory(cat)}
+                        title="Toifani o'chirish"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Manage Existing Wallpapers */}
       {activeTab === "manage" && (
         <div className="admin-manage-section">
           <div className="admin-manage-toolbar">
@@ -624,7 +803,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                 type="text"
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
-                placeholder="Nomi, toifasi yoki tegi bo'yicha qidirish..."
+                placeholder="Nomi, toifasi, muallifi yoki tegi bo'yicha qidirish..."
               />
             </div>
             <div className="manage-count">
@@ -636,6 +815,7 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
             <div className="table-head">
               <span className="col-preview">Rasm</span>
               <span className="col-title">Nomi & Ma'lumot</span>
+              <span className="col-author">Muallif</span>
               <span className="col-category">Toifa</span>
               <span className="col-size">O'lcham</span>
               <span className="col-featured">Featured</span>
@@ -662,6 +842,11 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                         ))}
                       </div>
                     </div>
+                    <div className="col-author">
+                      <span className="author-badge">
+                        <User size={11} /> {w.authorName || "Wallora"}
+                      </span>
+                    </div>
                     <div className="col-category">
                       <span className="cat-badge">{w.category}</span>
                     </div>
@@ -680,28 +865,18 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
                     </div>
                     <div className="col-actions">
                       <button
-                        className="action-icon-btn edit-btn"
-                        onClick={() => setEditingWallpaper({ ...w })}
+                        className="action-icon-btn"
+                        onClick={() => setEditingWallpaper(w)}
                         title="Tahrirlash"
                       >
-                        <Edit2 size={15} />
+                        <Edit2 size={14} />
                       </button>
-                      <a
-                        href={w.imageUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="action-icon-btn view-btn"
-                        title="Rasmni ochish"
-                      >
-                        <ExternalLink size={15} />
-                      </a>
                       <button
                         className="action-icon-btn delete-btn"
                         onClick={() => handleDeleteWallpaper(w.id, w.title)}
                         title="O'chirish"
-                        disabled={saving}
                       >
-                        <Trash2 size={15} />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
@@ -712,40 +887,76 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
         </div>
       )}
 
-      {/* Tab 3: JSONBin Configuration info */}
+      {/* Tab 4: JSONBin Info */}
       {activeTab === "info" && (
         <div className="admin-info-section">
-          <div className="admin-card">
-            <div className="admin-card-head">
-              <h2><Database size={18} /> JSONBin.io Konfiguratsiyasi va Ma'lumotlari</h2>
-              <p>Loyiha fon rasmlari saqlanayotgan JSONBin ma'lumotlari:</p>
+          <div className="info-grid">
+            <div className="info-tile">
+              <span className="info-label">BULUT PROVAYDER</span>
+              <span className="info-value highlight">JSONBin.io (v3 REST API)</span>
             </div>
+            <div className="info-tile">
+              <span className="info-label">BIN IDENTIFIKATORI</span>
+              <span className="info-value"><code>{JSONBIN_CONFIG.binId}</code></span>
+            </div>
+            <div className="info-tile">
+              <span className="info-label">JAMI RASMLAR</span>
+              <span className="info-value">{wallpapers.length} ta fon rasmi</span>
+            </div>
+            <div className="info-tile">
+              <span className="info-label">JAMI TOIFALAR</span>
+              <span className="info-value">{categories.length} ta kategoriya</span>
+            </div>
+          </div>
 
-            <div className="info-grid">
-              <div className="info-tile">
-                <span className="info-label">Bin ID</span>
-                <code className="info-value">{JSONBIN_CONFIG.binId}</code>
-              </div>
-              <div className="info-tile">
-                <span className="info-label">API Endpoint</span>
-                <code className="info-value">{JSONBIN_CONFIG.baseUrl}/{JSONBIN_CONFIG.binId}</code>
-              </div>
-              <div className="info-tile">
-                <span className="info-label">API Key</span>
-                <code className="info-value">{JSONBIN_CONFIG.apiKey.substring(0, 14)}...</code>
-              </div>
-              <div className="info-tile">
-                <span className="info-label">Ombordagi jami rasmlar soni</span>
-                <span className="info-value highlight">{wallpapers.length} ta rasm</span>
-              </div>
-            </div>
+          <div className="admin-json-viewer">
+            <h3>JSONBin dagi hozirgi to'liq ma'lumot (Jonli JSON struktura):</h3>
+            <pre>
+              {JSON.stringify({ wallpapersCount: wallpapers.length, categories, sample: wallpapers[0] }, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
 
-            <div className="admin-json-viewer">
-              <h3>Hozirgi JSON Bin ko'rinishi:</h3>
-              <pre>
-                {JSON.stringify({ wallpapers }, null, 2)}
-              </pre>
+      {/* Edit Category Modal */}
+      {editingCat && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setEditingCat(null);
+          }}
+        >
+          <div className="small-modal edit-modal">
+            <div className="eyebrow">
+              <span className="eyebrow-line" />
+              SUPER ADMIN
             </div>
+            <h2>Toifani Tahrirlash</h2>
+            <p>"{editingCat.oldName}" toifasining yangi nomini kiriting.</p>
+            <form onSubmit={handleSaveEditCategory} className="admin-edit-form">
+              <div className="form-field">
+                <label>Toifa nomi</label>
+                <input
+                  type="text"
+                  value={editingCat.newName}
+                  onChange={(e) => setEditingCat({ ...editingCat, newName: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="edit-modal-actions">
+                <button
+                  type="button"
+                  className="outline-button"
+                  onClick={() => setEditingCat(null)}
+                >
+                  Bekor qilish
+                </button>
+                <button type="submit" className="primary-button" disabled={saving}>
+                  <Check size={16} /> Saqlash
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -778,6 +989,18 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
               </div>
 
               <div className="form-field">
+                <label>Muallif nomi / Yuklovchi</label>
+                <input
+                  type="text"
+                  value={editingWallpaper.authorName || ""}
+                  onChange={(e) =>
+                    setEditingWallpaper({ ...editingWallpaper, authorName: e.target.value })
+                  }
+                  placeholder="Muallif ismini kiriting"
+                />
+              </div>
+
+              <div className="form-field">
                 <label>Rasm URL</label>
                 <input
                   type="url"
@@ -791,18 +1014,22 @@ export function AdminPanel({ wallpapers, onWallpapersUpdated, onNotice }: AdminP
 
               <div className="form-field">
                 <label>Toifa</label>
-                <input
-                  type="text"
+                <select
                   value={editingWallpaper.category}
                   onChange={(e) =>
                     setEditingWallpaper({ ...editingWallpaper, category: e.target.value })
                   }
-                  required
-                />
+                >
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="form-field">
-                <label>Tavsif</label>
+                <label>Rasm izohi (Tavsif)</label>
                 <textarea
                   value={editingWallpaper.description || ""}
                   onChange={(e) =>

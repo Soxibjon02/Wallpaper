@@ -1,5 +1,5 @@
 import type { Wallpaper } from "@shared/index";
-import { demoWallpapers } from "@shared/index";
+import { demoWallpapers, defaultCategories } from "@shared/index";
 
 export const JSONBIN_CONFIG = {
   binId: "6adf382fffd5d160538c8a63",
@@ -32,7 +32,25 @@ export function setAdminAuthenticated(auth: boolean): void {
   }
 }
 
-export async function fetchWallpapersFromBin(): Promise<Wallpaper[]> {
+export interface CatalogueData {
+  wallpapers: Wallpaper[];
+  categories: string[];
+}
+
+// In-memory cache of current categories so saveWallpapersToBin preserves them
+let cachedCategories: string[] = [...defaultCategories];
+
+export function getCachedCategories(): string[] {
+  return cachedCategories;
+}
+
+export function setCachedCategories(cats: string[]): void {
+  if (Array.isArray(cats) && cats.length) {
+    cachedCategories = cats;
+  }
+}
+
+export async function fetchCatalogueFromBin(): Promise<CatalogueData> {
   try {
     const url = `${JSONBIN_CONFIG.baseUrl}/${JSONBIN_CONFIG.binId}/latest`;
     const response = await fetch(url, {
@@ -50,30 +68,45 @@ export async function fetchWallpapersFromBin(): Promise<Wallpaper[]> {
     const data = await response.json();
     const record = data && typeof data === "object" && "record" in data ? (data as { record: unknown }).record : data;
 
-    if (record && typeof record === "object" && Array.isArray((record as { wallpapers?: unknown }).wallpapers)) {
-      return (record as { wallpapers: Wallpaper[] }).wallpapers;
+    let wallpapers: Wallpaper[] = demoWallpapers;
+    let categories: string[] = defaultCategories;
+
+    if (record && typeof record === "object") {
+      const recObj = record as { wallpapers?: unknown; categories?: unknown };
+      if (Array.isArray(recObj.wallpapers)) {
+        wallpapers = recObj.wallpapers as Wallpaper[];
+      }
+      if (Array.isArray(recObj.categories) && recObj.categories.length) {
+        categories = recObj.categories as string[];
+      }
+    } else if (Array.isArray(record)) {
+      wallpapers = record as Wallpaper[];
     }
 
-    if (Array.isArray(record)) {
-      return record as Wallpaper[];
-    }
-
-    return demoWallpapers;
+    setCachedCategories(categories);
+    return { wallpapers, categories };
   } catch (err) {
-    console.warn("Failed to fetch from JSONBin, falling back to local:", err);
-    return demoWallpapers;
+    console.warn("Failed to fetch from JSONBin, falling back to local defaults:", err);
+    return { wallpapers: demoWallpapers, categories: defaultCategories };
   }
 }
 
-export async function saveWallpapersToBin(wallpapers: Wallpaper[]): Promise<boolean> {
+export async function fetchWallpapersFromBin(): Promise<Wallpaper[]> {
+  const catalogue = await fetchCatalogueFromBin();
+  return catalogue.wallpapers;
+}
+
+export async function saveCatalogueToBin(wallpapers: Wallpaper[], categories: string[]): Promise<boolean> {
   const url = `${JSONBIN_CONFIG.baseUrl}/${JSONBIN_CONFIG.binId}`;
+  setCachedCategories(categories);
+
   const response = await fetch(url, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       "X-Master-Key": JSONBIN_CONFIG.apiKey,
     },
-    body: JSON.stringify({ wallpapers }),
+    body: JSON.stringify({ wallpapers, categories }),
   });
 
   if (!response.ok) {
@@ -83,3 +116,9 @@ export async function saveWallpapersToBin(wallpapers: Wallpaper[]): Promise<bool
 
   return true;
 }
+
+export async function saveWallpapersToBin(wallpapers: Wallpaper[], categories?: string[]): Promise<boolean> {
+  const cats = categories && categories.length ? categories : cachedCategories;
+  return saveCatalogueToBin(wallpapers, cats);
+}
+
